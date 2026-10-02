@@ -1,0 +1,159 @@
+// This is the Prisma schema for EVE Healthcare Backend.
+// CentreTest is a separate model because the same diagnostic test
+// can have different prices at different centres. Price belongs to the
+// relationship, not to the test itself.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum WebhookInboxStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  bookings Booking[]
+
+  @@map("users")
+}
+
+model DiagnosticCentre {
+  id        String   @id @default(uuid())
+  name      String
+  location  String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  centreTests CentreTest[]
+
+  @@map("diagnostic_centres")
+}
+
+model DiagnosticTest {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  centreTests CentreTest[]
+
+  @@map("diagnostic_tests")
+}
+
+// Price lives here, NOT on the test, because the same test costs
+// differently at different centres.
+model CentreTest {
+  id       String  @id @default(uuid())
+  centreId String  @map("centre_id")
+  testId   String  @map("test_id")
+  price    Decimal @db.Decimal(10, 2)
+
+  centre DiagnosticCentre @relation(fields: [centreId], references: [id], onDelete: Restrict)
+  test   DiagnosticTest   @relation(fields: [testId], references: [id], onDelete: Restrict)
+
+  bookings Booking[]
+
+  @@unique([centreId, testId])
+  @@index([centreId])
+  @@index([testId])
+  @@map("centre_tests")
+}
+
+model Booking {
+  id            String        @id @default(uuid())
+  userId        String        @map("user_id")
+  centreTestId  String        @map("centre_test_id")
+  appointmentAt DateTime      @map("appointment_at")
+  amount        Decimal       @db.Decimal(10, 2)
+  status        BookingStatus @default(PENDING)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  user       User       @relation(fields: [userId], references: [id])
+  centreTest CentreTest @relation(fields: [centreTestId], references: [id])
+  payment    Payment?
+
+  @@index([userId])
+  @@index([status])
+  @@map("bookings")
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  bookingId         String        @unique @map("booking_id")
+  amount            Decimal       @db.Decimal(10, 2)
+  status            PaymentStatus @default(PENDING)
+  providerReference String?       @map("provider_reference")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  booking       Booking        @relation(fields: [bookingId], references: [id])
+  paymentEvents PaymentEvent[]
+
+  @@index([bookingId])
+  @@map("payments")
+}
+
+model PaymentEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique @map("event_id")
+  paymentId   String   @map("payment_id")
+  status      String
+  processedAt DateTime? @map("processed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@map("payment_events")
+}
+
+model WebhookInbox {
+  id        String             @id @default(uuid())
+  eventId   String             @unique @map("event_id")
+  payload   Json
+  status    WebhookInboxStatus @default(RECEIVED)
+  attempts  Int                @default(0)
+  lastError String?            @map("last_error")
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("webhook_inbox")
+}
